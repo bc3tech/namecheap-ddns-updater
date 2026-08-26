@@ -2,11 +2,39 @@
 
 This small Flask service forwards DNS update requests to Namecheap.
 
+## Deploy to Azure
+
+The project is configured for Azure Container Apps through the Azure Developer
+CLI (`azd`). The container is built for `linux/amd64` and listens on port 80.
+
+Install the [Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd),
+authenticate, and run the deployment from the repository root:
+
+```text
+azd auth login
+azd deploy
+```
+
+`azd deploy` builds the container for Azure and deploys it to the Container App
+associated with the active azd environment. After it completes, retrieve the
+public Container Apps URL with:
+
+```text
+azd show
+```
+
+Copy the HTTPS URL shown under **Services**. Use that URL when configuring the
+NAS below. If the Azure resources have not been provisioned yet and the project
+is being used with an azd infrastructure definition, run `azd up` for the
+initial provision-and-deploy workflow instead.
+
+For later application or Dockerfile changes, run `azd deploy` again.
+
 ## Run with Docker
 
 ```text
-docker build --build-arg PORT=7780 -t namecheap-ddns-proxy .
-docker run --rm -p 7780:7780 namecheap-ddns-proxy
+docker build -t namecheap-ddns-proxy .
+docker run --rm -p 7780:80 namecheap-ddns-proxy
 ```
 
 Successful upstream responses are logged with the hostname, derived host and
@@ -30,19 +58,33 @@ The final two hostname labels become `domain`, and preceding labels become
 
 ## Configure Synology DSM
 
-Create a **Customized DDNS Provider** with this query URL:
+After deploying to Azure, open **Control Panel > External Access > DDNS** in
+DSM and create a **Customized DDNS Provider**. Replace
+`<container-app-hostname>` with the hostname from the HTTPS URL returned by
+`azd show` (do not include `https://` or a port):
 
 ```text
-http://<nas-address>:7780/update?host=__USERNAME__&domain=__HOSTNAME__&password=__PASSWORD__&ip=__MYIP__
+https://<container-app-hostname>/update?host=__USERNAME__&domain=__HOSTNAME__&******
 ```
 
-Use the NAS LAN address or a hostname resolvable by DSM rather than
-`localhost`. Configure the DDNS entry with:
+Add a DDNS entry using that customized provider and configure:
 
 - **Hostname:** the Namecheap domain, such as `example.com`
 - **Username/Email:** the Namecheap host, such as `home` or `@`
 - **Password/Key:** the Namecheap Dynamic DNS password
 - **External Address (IPv4):** `Auto`
+
+DSM will call the Azure endpoint over HTTPS, so the NAS does not need a
+port-forwarding rule or a local address for this proxy. Use the Azure hostname,
+not `localhost` or the NAS LAN address.
+
+For example, if the Namecheap record is `home.example.com`, use:
+
+- **Hostname:** `example.com`
+- **Username/Email:** `home`
+
+For the apex record `example.com`, use `@` as the username/host. Test or save
+the DDNS entry in DSM; a successful update returns `good`.
 
 The proxy also accepts the original `hostname`, `ipAddress`, and `key`
 parameters at `/update`. For Synology, the documented route and parameter names
