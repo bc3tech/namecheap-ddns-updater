@@ -1,14 +1,19 @@
 FROM python:3.14-slim
 
+ARG PORT=7780
+
 WORKDIR /app
 
-ARG PIP_INDEX_URL=https://pypi.org/simple/
+ENV PIP_INDEX_URL=https://packagefeedproxy.microsoft.io/pypi/simple
+ENV UV_INDEX_URL=https://packagefeedproxy.microsoft.io/pypi/simple
+ENV PYTHONUNBUFFERED=1
+ENV PORT=${PORT}
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --index-url "$PIP_INDEX_URL" -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py .
 
-EXPOSE 8080
+EXPOSE ${PORT}
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "app:app"]
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT} --access-logfile - --error-logfile - app:app"]
