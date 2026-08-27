@@ -12,31 +12,32 @@ authenticate, and run the deployment from the repository root:
 
 ```text
 azd auth login
-azd deploy
+azd up
 ```
 
-`azd deploy` builds the container for Azure and deploys it to the Container App
-associated with the active azd environment. After it completes, retrieve the
-public Container Apps URL with:
+`azd up` provisions the Azure Container Registry, Application Insights,
+Container Apps environment, and Container App. It builds this project into a
+container image, pushes the image to the registry, and deploys it to the
+Container App. After it completes, retrieve the public Container Apps URL with:
 
 ```text
 azd show
 ```
 
 Copy the HTTPS URL shown under **Services**. Use that URL when configuring the
-NAS below. If the Azure resources have not been provisioned yet and the project
-is being used with an azd infrastructure definition, run `azd up` for the
-initial provision-and-deploy workflow instead.
+NAS below.
 
 For later application or Dockerfile changes, run `azd deploy` again.
+The Container App scales to zero when idle and never uses more than one
+replica; azd reapplies these bounds after provisioning and deployment.
 
 ### Enable Application Insights
 
-The app uses the Azure Monitor OpenTelemetry distro. To send telemetry, set
-`APPLICATIONINSIGHTS_CONNECTION_STRING` on the Azure Container App to the
-connection string from an Application Insights resource. Keep the connection
-string in the Container App configuration or another secret store; do not add
-it to source control.
+The app uses the Azure Monitor OpenTelemetry distro. The azd Container Apps
+resource automatically provisions a workspace-based Application Insights
+resource and configures the Container App's
+`APPLICATIONINSIGHTS_CONNECTION_STRING` environment variable with its
+connection string. Keep the connection string out of source control.
 
 With the setting present, the app automatically reports Flask requests,
 outbound Namecheap requests, application logs, metrics, and exceptions to

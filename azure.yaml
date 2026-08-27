@@ -3,6 +3,29 @@
 name: namecheap-ddns-updater
 metadata:
     template: azd-init@1.31.2
+hooks:
+    postprovision:
+        windows:
+            shell: pwsh
+            interactive: false
+            continueOnError: false
+            run: scripts/configure-container-app-scaling.ps1
+        posix:
+            shell: sh
+            interactive: false
+            continueOnError: false
+            run: scripts/configure-container-app-scaling.sh
+    postdeploy:
+        windows:
+            shell: pwsh
+            interactive: false
+            continueOnError: false
+            run: scripts/configure-container-app-scaling.ps1
+        posix:
+            shell: sh
+            interactive: false
+            continueOnError: false
+            run: scripts/configure-container-app-scaling.sh
 services:
     namecheap-ddns-updater:
         project: .
@@ -11,10 +34,7 @@ services:
         docker:
             path: Dockerfile
             platform: linux/amd64
-        service:
-            image: namecheap-ddns-updater
-            env:
-                APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATION_INSIGHTS_CONNECTION_STRING}
-                PORT: "80"
-infra:
-    template: infra/main.bicep
+resources:
+    namecheap-ddns-updater:
+        type: host.containerapp
+        port: 80
