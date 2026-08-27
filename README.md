@@ -1,106 +1,243 @@
 # Namecheap Dynamic DNS Proxy
 
-This small Flask service forwards DNS update requests to Namecheap.
+This Flask service accepts Dynamic DNS update requests and forwards them to
+Namecheap. It is designed for Synology DSM, but it also supports Namecheap's
+legacy parameter names.
+
+The only application route is `GET /update`. Responses use the standard DDNS
+values `good`, `nohost`, `badauth`, and `911`, all with HTTP 200 so DSM can
+interpret them.
 
 ## Deploy to Azure
 
-The project is configured for Azure Container Apps through the Azure Developer
-CLI (`azd`). The container is built for `linux/amd64` and listens on port 80.
+### Prerequisites
 
-Install the [Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd),
-authenticate, and run the deployment from the repository root:
+Install and authenticate the following tools:
 
-```text
+- [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli)
+- [Azure Developer CLI](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd)
+- [Docker](https://docs.docker.com/get-docker/)
+
+You also need a Namecheap domain with Dynamic DNS enabled and its Dynamic DNS
+password. See [Namecheap's Dynamic DNS
+instructions](https://www.namecheap.com/support/knowledgebase/article.aspx/595/11/how-do-i-enable-dynamic-dns-for-a-domain/).
+
+From the repository root, sign in:
+
+```powershell
+az login
 azd auth login
+```
+
+### Provision and deploy
+
+Run:
+
+```powershell
 azd up
 ```
 
-`azd up` provisions the Azure Container Registry, Application Insights,
-Container Apps environment, and Container App. It builds this project into a
-container image, pushes the image to the registry, and deploys it to the
-Container App. After it completes, retrieve the public Container Apps URL with:
+On the first run, azd asks for the Azure subscription and location. To set
+them without prompts for a new named azd environment:
 
-```text
+```powershell
+azd up --environment namecheap-ddns --subscription <subscription-id> --location westus3
+```
+
+Alternatively, select an existing environment and set its values before
+running `azd up`:
+
+```powershell
+azd env select namecheap-ddns
+azd env set AZURE_SUBSCRIPTION_ID <subscription-id>
+azd env set AZURE_LOCATION westus3
+azd up
+```
+
+`azd up` builds this project into a `linux/amd64` container image, pushes it
+to the Azure Container Registry, and deploys it to Azure Container Apps. The
+project intentionally defines `project: .` rather than a pre-built `image:`,
+so azd owns the build and publish workflow.
+
+The azd-managed resources include:
+
+- Azure Container Registry
+- Workspace-based Application Insights
+- Log Analytics
+- Container Apps environment
+- The Dynamic DNS proxy Container App
+
+The Container App scales to zero when idle and is limited to one replica.
+azd reapplies these limits after provisioning and deployment. Scale-to-zero
+can cause a cold-start delay on the first request, and the supporting Azure
+resources can still incur charges. To remove the deployment and its ongoing
+resource charges:
+
+```powershell
+azd down
+```
+
+Retrieve the deployed HTTPS endpoint with:
+
+```powershell
 azd show
 ```
 
-Copy the HTTPS URL shown under **Services**. Use that URL when configuring the
-NAS below.
+Copy the URL shown under **Services**. Use the hostname from that URL when
+configuring DSM.
 
-For later application or Dockerfile changes, run `azd deploy` again.
-The Container App scales to zero when idle and never uses more than one
-replica; azd reapplies these bounds after provisioning and deployment.
+For later application or Dockerfile changes, run:
 
-### Enable Application Insights
+```powershell
+azd deploy
+```
 
-The app uses the Azure Monitor OpenTelemetry distro. The azd Container Apps
-resource automatically provisions a workspace-based Application Insights
-resource and configures the Container App's
-`APPLICATIONINSIGHTS_CONNECTION_STRING` environment variable with its
-connection string. Keep the connection string out of source control.
+### Application Insights
 
-With the setting present, the app automatically reports Flask requests,
-outbound Namecheap requests, application logs, metrics, and exceptions to
-Application Insights. Without it, the app continues to run locally with
-console logging only.
+The application uses the Azure Monitor OpenTelemetry distro. The azd-managed
+Container App receives `APPLICATIONINSIGHTS_CONNECTION_STRING` from the
+workspace-based Application Insights resource. No manual environment-variable
+configuration is required.
 
-## Run with Docker
+When the connection string is present, the application reports Flask
+requests, outbound Namecheap requests, application logs, metrics, and
+exceptions to Application Insights. Without it, local execution uses console
+logging only.
 
-```text
+## Run locally
+
+### Python
+
+Requires Python 3.14.
+
+Create a virtual environment and install the dependencies:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Start the development server:
+
+```powershell
+python app.py
+```
+
+The server listens on `http://localhost:7780` by default. To use another
+port:
+
+```powershell
+$env:PORT = "8000"
+python app.py
+```
+
+### Docker
+
+Build and run the production container:
+
+```powershell
 docker build -t namecheap-ddns-proxy .
 docker run --rm -p 7780:80 namecheap-ddns-proxy
 ```
 
-Successful upstream responses are logged with the hostname, derived host and
-domain, IP address, and status code. Request validation, upstream requests,
-response parsing, response mapping, and failures are also logged. The Namecheap
-key is never logged. When running the container, view these messages with
-`docker logs -f <container-id>`.
+The container listens on port `80`; the example maps it to port `7780` on the
+local machine. View container logs with:
 
-If your environment uses an internal Python package mirror, pass it during the
-build with `--build-arg PIP_INDEX_URL=<mirror-url>`.
-
-Call the proxy with `hostname`, `ipAddress`, and `key` query parameters:
-
-```text
-http://localhost:7780/update?hostname=home.example.com&ipAddress=192.0.2.10&key=your-key
+```powershell
+docker ps
+docker logs -f <container-id>
 ```
 
-The final two hostname labels become `domain`, and preceding labels become
-`host`. A hostname with no subdomain uses `@`; wildcard and apex values such as
-`*.example.com` and `@.example.com` are preserved.
+## Send an update
+
+Keep the Namecheap Dynamic DNS key in a local variable rather than placing it
+in source code or a documented URL. This example uses the legacy parameter
+names:
+
+```powershell
+$namecheapKey = Read-Host "Namecheap Dynamic DNS key"
+curl.exe --get "http://localhost:7780/update" `
+    --data-urlencode "hostname=home.example.com" `
+    --data-urlencode "ipAddress=192.0.2.10" `
+    --data-urlencode "key=$namecheapKey"
+```
+
+`192.0.2.10` is documentation-only; replace it with the address that should
+be written to Namecheap.
+
+The supported parameter forms are:
+
+| Use | Parameters |
+| --- | --- |
+| Legacy | `hostname`, `ipAddress`, `key` |
+| Synology split | `host`, `domain`, `password`, and `ip` or `myip` |
+| Synology username | `username`, `hostname`, `password`, and `ip` or `myip` |
+
+For legacy `hostname` requests, the final two labels become the domain and
+all preceding labels become the host. A hostname with no subdomain uses `@`.
+Wildcard and apex values such as `*.example.com` and `@.example.com` are
+preserved.
+
+Responses have these meanings:
+
+| Response | Meaning |
+| --- | --- |
+| `good` | Namecheap accepted the update |
+| `nohost` | The domain or DNS host was not found |
+| `badauth` | A required parameter is missing or the key is invalid |
+| `911` | The upstream request failed or returned an invalid response |
 
 ## Configure Synology DSM
 
 After deploying to Azure, open **Control Panel > External Access > DDNS** in
-DSM and create a **Customized DDNS Provider**. Replace
-`<container-app-hostname>` with the hostname from the HTTPS URL returned by
-`azd show` (do not include `https://` or a port):
+DSM and create a **Customized DDNS Provider**.
+
+Replace `<container-app-hostname>` with the hostname from `azd show`. Do not
+include `https://` or a port. Keep DSM's `******` password placeholder in the
+URL:
 
 ```text
 https://<container-app-hostname>/update?host=__USERNAME__&domain=__HOSTNAME__&******
 ```
 
-Add a DDNS entry using that customized provider and configure:
+Add a DDNS entry using that provider:
 
-- **Hostname:** the Namecheap domain, such as `example.com`
-- **Username/Email:** the Namecheap host, such as `home` or `@`
-- **Password/Key:** the Namecheap Dynamic DNS password
-- **External Address (IPv4):** `Auto`
+| DSM field | Value |
+| --- | --- |
+| Hostname | The Namecheap domain, such as `example.com` |
+| Username/Email | The Namecheap host, such as `home` or `@` |
+| Password/Key | The Namecheap Dynamic DNS password |
+| External Address (IPv4) | `Auto` |
 
-DSM will call the Azure endpoint over HTTPS, so the NAS does not need a
-port-forwarding rule or a local address for this proxy. Use the Azure hostname,
-not `localhost` or the NAS LAN address.
+For the record `home.example.com`, use `example.com` as the hostname and
+`home` as the username. For the apex record `example.com`, use `@` as the
+username/host.
 
-For example, if the Namecheap record is `home.example.com`, use:
+DSM calls the Azure endpoint over HTTPS, so the NAS does not need a
+port-forwarding rule or a local address for this proxy. Use the Azure
+hostname, not `localhost` or the NAS LAN address.
 
-- **Hostname:** `example.com`
-- **Username/Email:** `home`
+## Test and troubleshoot
 
-For the apex record `example.com`, use `@` as the username/host. Test or save
-the DDNS entry in DSM; a successful update returns `good`.
+Run the test suite:
 
-The proxy also accepts the original `hostname`, `ipAddress`, and `key`
-parameters at `/update`. For Synology, the documented route and parameter names
-above are recommended. It returns the standard DDNS responses `good`, `nohost`,
-`badauth`, or `911` with HTTP 200 so DSM can interpret the result.
+```powershell
+python -m unittest discover -s tests -v
+```
+
+Check Python syntax:
+
+```powershell
+python -m py_compile app.py tests\test_app.py
+```
+
+If a request returns `badauth`, check the parameter names and confirm that the
+Namecheap key is the Dynamic DNS password. If it returns `nohost`, check the
+domain and host values. If it returns `911`, inspect the application logs for
+timeout, connection, HTTP status, or XML parsing errors without exposing the
+Namecheap key.
+
+Never commit or log the Namecheap key. Prefer HTTPS whenever the proxy is
+deployed outside local development.
