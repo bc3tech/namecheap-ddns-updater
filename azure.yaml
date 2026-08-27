@@ -11,7 +11,10 @@ services:
         docker:
             path: Dockerfile
             platform: linux/amd64
-resources:
-    namecheap-ddns-updater:
-        type: host.containerapp
-        port: 80
+        service:
+            image: namecheap-ddns-updater
+            env:
+                APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATION_INSIGHTS_CONNECTION_STRING}
+                PORT: "80"
+infra:
+    template: infra/main.bicep
