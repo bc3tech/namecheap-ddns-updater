@@ -3,17 +3,21 @@ import os
 import sys
 import xml.etree.ElementTree as ET
 
+import flask
 import requests
-from flask import Flask, make_response, request
+from azure.monitor.opentelemetry import configure_azure_monitor
 
 
 NAMECHEAP_UPDATE_URL = "https://dynamicdns.park-your-domain.com/update"
 UPSTREAM_TIMEOUT_SECONDS = 10
 
-app = Flask(__name__)
-app.logger.handlers.clear()
-app.logger.addHandler(logging.StreamHandler(sys.stderr))
+if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
+    configure_azure_monitor(logger_name=__name__)
+
+app = flask.Flask(__name__)
 app.logger.setLevel(logging.INFO)
+if not any(isinstance(handler, logging.StreamHandler) for handler in app.logger.handlers):
+    app.logger.addHandler(logging.StreamHandler(sys.stderr))
 app.logger.propagate = False
 
 
@@ -36,7 +40,7 @@ def validate_domain(domain: str) -> str:
 
 
 def resolve_update_parameters() -> tuple[str, str | None, str | None, str | None, str | None]:
-    args = request.args
+    args = flask.request.args
     ip_address = args.get("ip") or args.get("myip") or args.get("ipAddress")
     key = args.get("password") or args.get("key")
 
@@ -65,7 +69,7 @@ def resolve_update_parameters() -> tuple[str, str | None, str | None, str | None
 
 
 def protocol_response(body: str):
-    response = make_response(body, 200)
+    response = flask.make_response(body, 200)
     response.headers["Content-Type"] = "text/plain; charset=utf-8"
     return response
 
@@ -114,10 +118,10 @@ def update_dns():
     app.logger.info(
         "Received DDNS update request path=%s remote_addr=%s user_agent=%s "
         "query_parameters=%s",
-        request.path,
-        request.remote_addr or "-",
-        request.user_agent.string or "-",
-        ",".join(sorted(request.args.keys())) or "-",
+        flask.request.path,
+        flask.request.remote_addr or "-",
+        flask.request.user_agent.string or "-",
+        ",".join(sorted(flask.request.args.keys())) or "-",
     )
 
     source, host, domain, key, ip_address = resolve_update_parameters()

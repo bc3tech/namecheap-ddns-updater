@@ -30,6 +30,19 @@ initial provision-and-deploy workflow instead.
 
 For later application or Dockerfile changes, run `azd deploy` again.
 
+### Enable Application Insights
+
+The app uses the Azure Monitor OpenTelemetry distro. To send telemetry, set
+`APPLICATIONINSIGHTS_CONNECTION_STRING` on the Azure Container App to the
+connection string from an Application Insights resource. Keep the connection
+string in the Container App configuration or another secret store; do not add
+it to source control.
+
+With the setting present, the app automatically reports Flask requests,
+outbound Namecheap requests, application logs, metrics, and exceptions to
+Application Insights. Without it, the app continues to run locally with
+console logging only.
+
 ## Run with Docker
 
 ```text
